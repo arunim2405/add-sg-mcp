@@ -67,6 +67,7 @@ function runCli(
     encoding: "utf-8",
     env: {
       ...process.env,
+      COPILOT_HOME: undefined,
       HOME: homeDir,
       XDG_CONFIG_HOME: join(homeDir, ".config"),
       CODEX_HOME: join(homeDir, ".codex"),
@@ -2174,6 +2175,117 @@ test("sync: prints already in sync when nothing to change", () => {
 
   const output = `${result.stdout}\n${result.stderr}`;
   assert.match(output, /already in sync/i);
+});
+
+test("E2E CLI: Copilot CLI global install writes ~/.copilot even when XDG_CONFIG_HOME is set", () => {
+  const projectDir = createTempDir();
+  const homeDir = createTempDir();
+
+  const result = runCli(
+    [
+      "https://mcp.example.com/mcp",
+      "-a",
+      "github-copilot-cli",
+      "-g",
+      "-y",
+      "--name",
+      "copilot-home",
+    ],
+    projectDir,
+    homeDir,
+  );
+
+  if (result.status !== 0) {
+    throw new Error(
+      `CLI failed.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    );
+  }
+
+  const configPath = join(homeDir, ".copilot", "mcp-config.json");
+  assert.strictEqual(existsSync(configPath), true);
+  assert.strictEqual(
+    existsSync(join(homeDir, ".config", "mcp-config.json")),
+    false,
+  );
+  const saved = JSON.parse(readFileSync(configPath, "utf-8")) as {
+    mcpServers: Record<string, { url?: string }>;
+  };
+  assert.strictEqual(
+    saved.mcpServers["copilot-home"]?.url,
+    "https://mcp.example.com/mcp",
+  );
+});
+
+test("E2E CLI: Copilot CLI is not detected from XDG_CONFIG_HOME alone", () => {
+  const projectDir = createTempDir();
+  const homeDir = createTempDir();
+  mkdirSync(join(homeDir, ".config"), { recursive: true });
+
+  const result = runCli(
+    ["https://mcp.example.com/mcp", "-g", "-y", "--name", "detect-xdg"],
+    projectDir,
+    homeDir,
+  );
+
+  assert.match(result.stdout, /Detected 0 agents/);
+  assert.doesNotMatch(result.stdout, /Installing to: GitHub Copilot CLI/);
+});
+
+test("E2E CLI: Copilot CLI is detected from ~/.copilot", () => {
+  const projectDir = createTempDir();
+  const homeDir = createTempDir();
+  mkdirSync(join(homeDir, ".config"), { recursive: true });
+  mkdirSync(join(homeDir, ".copilot"), { recursive: true });
+
+  const result = runCli(
+    ["https://mcp.example.com/mcp", "-g", "-y", "--name", "detect-home"],
+    projectDir,
+    homeDir,
+  );
+
+  if (result.status !== 0) {
+    throw new Error(
+      `CLI failed.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    );
+  }
+  assert.match(result.stdout, /Installing to: GitHub Copilot CLI/);
+  assert.strictEqual(
+    existsSync(join(homeDir, ".copilot", "mcp-config.json")),
+    true,
+  );
+});
+
+test("E2E CLI: Copilot CLI global install honors COPILOT_HOME", () => {
+  const projectDir = createTempDir();
+  const homeDir = createTempDir();
+  const copilotHome = createTempDir();
+
+  const result = runCli(
+    [
+      "https://mcp.example.com/mcp",
+      "-a",
+      "github-copilot-cli",
+      "-g",
+      "-y",
+      "--name",
+      "copilot-custom-home",
+    ],
+    projectDir,
+    homeDir,
+    { COPILOT_HOME: copilotHome },
+  );
+
+  if (result.status !== 0) {
+    throw new Error(
+      `CLI failed.\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    );
+  }
+
+  assert.strictEqual(existsSync(join(copilotHome, "mcp-config.json")), true);
+  assert.strictEqual(
+    existsSync(join(homeDir, ".copilot", "mcp-config.json")),
+    false,
+  );
 });
 
 test("E2E CLI: Grok alias honors GROK_HOME and maps native remote fields", () => {
